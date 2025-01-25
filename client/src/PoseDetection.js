@@ -1,7 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
-import '@tensorflow/tfjs-backend-cpu';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
 const PoseDetection = () => {
@@ -13,7 +12,7 @@ const PoseDetection = () => {
     const setupBackend = async () => {
       try {
         await tf.setBackend('webgl'); // Use WebGL for computations
-        await tf.ready(); // Ensure TensorFlow.js is ready
+        await tf.ready();
         console.log('Backend set to:', tf.getBackend());
       } catch (error) {
         console.error('Error in setupBackend:', error);
@@ -22,17 +21,13 @@ const PoseDetection = () => {
 
     const setupCamera = async () => {
       const video = videoRef.current;
-      const canvas = canvasRef.current;
       video.width = 640;
       video.height = 360;
-      canvas.width = video.width;
-      canvas.height = video.height;
 
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 360 },
       });
       video.srcObject = stream;
-      console.log('Camera setup complete');
 
       return new Promise((resolve) => {
         video.onloadedmetadata = () => {
@@ -42,48 +37,17 @@ const PoseDetection = () => {
     };
 
     const loadMoveNet = async () => {
-      const modelUrl = '/models/movenet/model.json';
       const detector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
         {
           modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-          modelUrl,
         }
       );
 
-      // Cache the model in IndexedDB
-      await detector.estimatePoses(tf.zeros([1, 256, 256, 3])); // Warmup model for saving
-      console.log('MoveNet model loaded and warmed up');
+      // Warmup model with correct tensor shape
+      await detector.estimatePoses(tf.zeros([1, 256, 256, 3]));
+      console.log('MoveNet model warmed up');
       return detector;
-    };
-
-    const drawKeypoints = (keypoints, ctx) => {
-      keypoints.forEach((keypoint) => {
-        if (keypoint.score > threshold) {
-          ctx.beginPath();
-          ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
-          ctx.fillStyle = 'yellow';
-          ctx.fill();
-        }
-      });
-    };
-
-    const drawSkeleton = (keypoints, ctx) => {
-      const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(
-        poseDetection.SupportedModels.MoveNet
-      );
-      adjacentKeyPoints.forEach(([i, j]) => {
-        const kp1 = keypoints[i];
-        const kp2 = keypoints[j];
-        if (kp1.score > threshold && kp2.score > threshold) {
-          ctx.beginPath();
-          ctx.moveTo(kp1.x, kp1.y);
-          ctx.lineTo(kp2.x, kp2.y);
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = 'blue';
-          ctx.stroke();
-        }
-      });
     };
 
     const detectPose = async (detector) => {
@@ -91,26 +55,30 @@ const PoseDetection = () => {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
       const poses = await detector.estimatePoses(video);
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
       if (poses.length > 0) {
-        const keypoints = poses[0].keypoints;
-        drawKeypoints(keypoints, ctx);
-        drawSkeleton(keypoints, ctx);
+        poses[0].keypoints.forEach((keypoint) => {
+          if (keypoint.score > threshold) {
+            ctx.beginPath();
+            ctx.arc(keypoint.x, keypoint.y, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = 'yellow';
+            ctx.fill();
+          }
+        });
       }
+
       requestAnimationFrame(() => detectPose(detector));
     };
 
     const main = async () => {
       try {
         await setupBackend();
-        console.log('Backend setup complete');
-        await setupCamera();
-        videoRef.current.play();
-        console.log('Video playing');
+        const video = await setupCamera();
+        video.play();
         const detector = await loadMoveNet();
-        console.log('MoveNet loaded');
         detectPose(detector);
       } catch (error) {
         console.error('Error in main setup:', error);
@@ -123,20 +91,19 @@ const PoseDetection = () => {
   return (
     <div>
       <h1>MoveNet Pose Detection</h1>
-      <video ref={videoRef} autoPlay playsInline width="640" height="360"></video>
-      <canvas ref={canvasRef} width="640" height="360"></canvas>
+      <video ref={videoRef} autoPlay playsInline></video>
+      <canvas ref={canvasRef}></canvas>
       <div>
-        <label htmlFor="threshold-slider">
-          Threshold: <span>{threshold.toFixed(1)}</span>
+        <label>
+          Threshold: <span>{threshold}</span>
         </label>
         <input
-          id="threshold-slider"
           type="range"
           min="0.1"
           max="1.0"
-          step="0.02"
+          step="0.01"
           value={threshold}
-          onChange={(event) => setThreshold(parseFloat(event.target.value))}
+          onChange={(e) => setThreshold(parseFloat(e.target.value))}
         />
       </div>
     </div>
