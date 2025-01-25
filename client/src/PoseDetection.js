@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-indexeddb';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
 const PoseDetection = () => {
@@ -19,8 +20,16 @@ const PoseDetection = () => {
         await tf.ready();
         console.log('Backend set to:', tf.getBackend());
       } catch (err) {
-        setError('Backend setup failed');
-        console.error('Backend setup error:', err);
+        console.warn('WebGL backend failed, falling back to IndexedDB:', err);
+        try {
+          await tf.setBackend('indexeddb');
+          await tf.ready();
+          console.log('Backend set to:', tf.getBackend());
+        } catch (fallbackErr) {
+          setError('Backend setup failed');
+          console.error('Backend setup error:', fallbackErr);
+          throw fallbackErr;
+        }
       }
     };
 
@@ -49,7 +58,6 @@ const PoseDetection = () => {
           poseDetection.SupportedModels.MoveNet,
           { modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING }
         );
-        await model.estimatePoses(tf.zeros([1, 256, 256, 3]));
         return model;
       } catch (err) {
         setError('Model loading failed');
@@ -63,11 +71,11 @@ const PoseDetection = () => {
         const video = videoRef.current;
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
-        
+
         const poses = await detector.estimatePoses(video);
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-        
+
         if (poses.length > 0) {
           poses[0].keypoints.forEach((keypoint) => {
             if (keypoint.score > threshold) {
@@ -78,7 +86,7 @@ const PoseDetection = () => {
             }
           });
         }
-        
+
         animationFrameId = requestAnimationFrame(() => detectPose(detector));
       } catch (err) {
         setError('Pose detection failed');
@@ -107,7 +115,7 @@ const PoseDetection = () => {
       }
       if (videoRef.current) {
         const tracks = videoRef.current.srcObject?.getTracks();
-        tracks?.forEach(track => track.stop());
+        tracks?.forEach((track) => track.stop());
       }
     };
   }, [threshold]);
