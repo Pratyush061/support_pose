@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-indexeddb';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
 const PoseDetection = () => {
@@ -11,7 +12,10 @@ const PoseDetection = () => {
   useEffect(() => {
     const setupBackend = async () => {
       try {
-        await tf.setBackend('webgl'); // Use WebGL for computations
+        // Try WebGL first, fallback to indexeddb if needed
+        if (!await tf.setBackend('webgl')) {
+          await tf.setBackend('indexeddb');
+        }
         await tf.ready();
         console.log('Backend set to:', tf.getBackend());
       } catch (error) {
@@ -23,12 +27,10 @@ const PoseDetection = () => {
       const video = videoRef.current;
       video.width = 640;
       video.height = 360;
-
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { width: 640, height: 360 },
       });
       video.srcObject = stream;
-
       return new Promise((resolve) => {
         video.onloadedmetadata = () => {
           resolve(video);
@@ -43,7 +45,6 @@ const PoseDetection = () => {
           modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
         }
       );
-
       // Warmup model with correct tensor shape
       await detector.estimatePoses(tf.zeros([1, 256, 256, 3]));
       console.log('MoveNet model warmed up');
@@ -55,10 +56,9 @@ const PoseDetection = () => {
       const canvas = canvasRef.current;
       const ctx = canvas.getContext('2d');
       const poses = await detector.estimatePoses(video);
-
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
+      
       if (poses.length > 0) {
         poses[0].keypoints.forEach((keypoint) => {
           if (keypoint.score > threshold) {
@@ -69,7 +69,6 @@ const PoseDetection = () => {
           }
         });
       }
-
       requestAnimationFrame(() => detectPose(detector));
     };
 
@@ -92,7 +91,7 @@ const PoseDetection = () => {
     <div>
       <h1>MoveNet Pose Detection</h1>
       <video ref={videoRef} autoPlay playsInline></video>
-      <canvas ref={canvasRef}></canvas>
+      <canvas ref={canvasRef} width={640} height={360}></canvas>
       <div>
         <label>
           Threshold: <span>{threshold}</span>
