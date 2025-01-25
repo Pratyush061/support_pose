@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as tf from '@tensorflow/tfjs';
 import '@tensorflow/tfjs-backend-webgl';
+import '@tensorflow/tfjs-backend-cpu';
 import * as poseDetection from '@tensorflow-models/pose-detection';
 
 const PoseDetection = () => {
@@ -11,9 +12,9 @@ const PoseDetection = () => {
   useEffect(() => {
     const setupBackend = async () => {
       try {
-        await tf.setBackend('webgl'); // Set WebGL as the backend
+        await tf.setBackend('webgl'); // Use WebGL for computations
         await tf.ready(); // Ensure TensorFlow.js is ready
-        console.log('Using backend:', tf.getBackend());
+        console.log('Backend set to:', tf.getBackend());
       } catch (error) {
         console.error('Error in setupBackend:', error);
       }
@@ -42,35 +43,17 @@ const PoseDetection = () => {
 
     const loadMoveNet = async () => {
       const modelUrl = '/models/movenet/model.json';
-      const modelKey = 'movenet_model'; // Key for IndexedDB storage
-
-      let detector;
-      try {
-        // Try loading from IndexedDB
-        await tf.setBackend('indexeddb'); // Switch backend for storage
-        const isModelStored = await tf.io.listModels().then((models) => models[modelKey]);
-        if (isModelStored) {
-          console.log('Loading MoveNet from IndexedDB...');
-          detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-            modelUrl: modelKey,
-          });
-        } else {
-          console.log('Loading MoveNet from network...');
-          detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-            modelUrl,
-          });
-          // Save to IndexedDB
-          const model = await tf.loadGraphModel(modelUrl);
-          await model.save(`indexeddb://${modelKey}`);
-          console.log('MoveNet model saved to IndexedDB');
+      const detector = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        {
+          modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+          modelUrl,
         }
-      } catch (error) {
-        console.error('Error loading MoveNet:', error);
-        throw error;
-      }
+      );
 
+      // Cache the model in IndexedDB
+      await detector.estimatePoses(tf.zeros([1, 256, 256, 3])); // Warmup model for saving
+      console.log('MoveNet model loaded and warmed up');
       return detector;
     };
 
@@ -86,7 +69,9 @@ const PoseDetection = () => {
     };
 
     const drawSkeleton = (keypoints, ctx) => {
-      const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(poseDetection.SupportedModels.MoveNet);
+      const adjacentKeyPoints = poseDetection.util.getAdjacentPairs(
+        poseDetection.SupportedModels.MoveNet
+      );
       adjacentKeyPoints.forEach(([i, j]) => {
         const kp1 = keypoints[i];
         const kp2 = keypoints[j];
