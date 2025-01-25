@@ -41,13 +41,37 @@ const PoseDetection = () => {
     };
 
     const loadMoveNet = async () => {
-      // Path to the local model files in public folder
       const modelUrl = '/models/movenet/model.json';
-      const model = await tf.loadGraphModel(modelUrl);
-      return poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
-        modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
-        modelUrl,
-      });
+      const modelKey = 'movenet_model'; // Key for IndexedDB storage
+
+      let detector;
+      try {
+        // Try loading from IndexedDB
+        await tf.setBackend('indexeddb'); // Switch backend for storage
+        const isModelStored = await tf.io.listModels().then((models) => models[modelKey]);
+        if (isModelStored) {
+          console.log('Loading MoveNet from IndexedDB...');
+          detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+            modelUrl: modelKey,
+          });
+        } else {
+          console.log('Loading MoveNet from network...');
+          detector = await poseDetection.createDetector(poseDetection.SupportedModels.MoveNet, {
+            modelType: poseDetection.movenet.modelType.SINGLEPOSE_LIGHTNING,
+            modelUrl,
+          });
+          // Save to IndexedDB
+          const model = await tf.loadGraphModel(modelUrl);
+          await model.save(`indexeddb://${modelKey}`);
+          console.log('MoveNet model saved to IndexedDB');
+        }
+      } catch (error) {
+        console.error('Error loading MoveNet:', error);
+        throw error;
+      }
+
+      return detector;
     };
 
     const drawKeypoints = (keypoints, ctx) => {
@@ -117,7 +141,9 @@ const PoseDetection = () => {
       <video ref={videoRef} autoPlay playsInline width="640" height="360"></video>
       <canvas ref={canvasRef} width="640" height="360"></canvas>
       <div>
-        <label htmlFor="threshold-slider">Threshold: <span>{threshold.toFixed(1)}</span></label>
+        <label htmlFor="threshold-slider">
+          Threshold: <span>{threshold.toFixed(1)}</span>
+        </label>
         <input
           id="threshold-slider"
           type="range"
