@@ -1,4 +1,4 @@
-const CACHE_NAME = 'v1';
+const CACHE_NAME = 'pose-detection-v2'; // Update cache name for versioning
 const urlsToCache = [
   '/', // Cache root page
   '/index.html', // Cache the HTML
@@ -7,53 +7,69 @@ const urlsToCache = [
   '/static/js/vendors~main.chunk.js',
   '/favicon.ico', // Cache favicon
   '/logo192.png', // Cache app logo
-  '/model/model.json', // Cache TensorFlow.js model
-  '/model/group1-shard1of1.bin', // Add binary shard files
-  // Add additional shards here if applicable
 ];
 
-// Install event: Cache specified files
+// Pre-cache critical assets during the installation phase
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      console.log('Caching app shell and model files...');
+      console.log('Precaching app shell...');
       return cache.addAll(urlsToCache);
     })
   );
 });
 
-// Fetch event: Serve files from cache; fallback to network
+// Stale-while-revalidate strategy for model files
 self.addEventListener('fetch', (event) => {
   const url = event.request.url;
 
-  // Cache-first strategy for model files
+  // Apply special handling for model files
   if (url.includes('/model/')) {
     event.respondWith(
       caches.match(event.request).then((cachedResponse) => {
-        return (
-          cachedResponse ||
-          fetch(event.request).then((networkResponse) => {
+        const fetchPromise = fetch(event.request)
+          .then((networkResponse) => {
             return caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse.clone());
+              console.log(`Model file updated: ${event.request.url}`);
               return networkResponse;
             });
           })
-        );
+          .catch((error) => {
+            console.error(`Network fetch failed for ${event.request.url}:`, error);
+            return cachedResponse; // Fallback to cache if network fails
+          });
+
+        return cachedResponse || fetchPromise; // Serve cached first, then update
       })
     );
   } else {
-    // Default behavior for other assets
+    // Default cache-first strategy for other assets
     event.respondWith(
       caches.match(event.request).then((response) => {
-        return response || fetch(event.request);
+        return (
+          response ||
+          fetch(event.request)
+            .then((networkResponse) => {
+              console.log(`Caching new resource: ${event.request.url}`);
+              return caches.open(CACHE_NAME).then((cache) => {
+                cache.put(event.request, networkResponse.clone());
+                return networkResponse;
+              });
+            })
+            .catch((error) => {
+              console.error(`Fetch failed for ${event.request.url}:`, error);
+              throw error;
+            })
+        );
       })
     );
   }
 });
 
-// Activate event: Clean up old caches
+// Activate event to clean up old caches
 self.addEventListener('activate', (event) => {
-  const cacheWhitelist = [CACHE_NAME];
+  const cacheWhitelist = [CACHE_NAME]; // Whitelist current cache version
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
